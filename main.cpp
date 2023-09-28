@@ -2,13 +2,18 @@
 
 #include <random>
 #include <iostream>
+#include <fstream>
 #include <mpi.h>
 #include <hdf5.h>
+#include <iomanip>
+#include <vector>
 
 using namespace std;
 
 void collective(long long rows, long long cols, long long localRows, double* arr);
 void independent(long long rows, long long cols, long long localRows, double* arr);
+void binary(long long cols, long long localRows, double* arr);
+void read_binary(long long cols, long long localRows);
 
 int main (){
 	MPI_Init(NULL, NULL);
@@ -19,9 +24,10 @@ int main (){
 
 	// create 2d array of random numbers
 	double time = MPI_Wtime();
-	// long long rows = mpiSize*125000;
 	long long rows = mpiSize*250000;
 	long long cols = 12500;
+	// long long rows = mpiSize*10;
+	// long long cols = 10;
 	long long localRows = rows/mpiSize;
 	std::uniform_real_distribution<double> unif(0.00001, 10);
 	std::default_random_engine re;
@@ -36,11 +42,23 @@ int main (){
 	}
 	if (!mpiRank) { cout << "Create matrix time: " << (MPI_Wtime() - time) << " seconds" << endl; }	
 
-	// perform collective write to hdf5
+	// for(int i = 0; i < localRows; i++) {
+	// 	for(int j = 0; j < cols; j++) {
+	// 		//*(arr + i * cols + j) = unif(re);
+	// 		std::cout << arr[i*cols + j] << " ";
+	// 	}
+	// 	std::cout << std::endl;
+	// }
+
+	//! perform collective write to hdf5
 	//collective(rows, cols, localRows, arr);
 
-	// perform independent write to hdf5
-	independent(rows, cols, localRows, arr);
+	//! perform independent write to hdf5
+	//independent(rows, cols, localRows, arr);
+
+	//! perform independent write to binary file
+	binary(cols, localRows, arr);
+	//read_binary(cols, localRows);
 
 	// end app
 	MPI_Barrier(MPI_COMM_WORLD);
@@ -208,4 +226,48 @@ void independent(long long rows, long long cols, long long localRows, double* ar
 	if (!mpiRank) { cout << "-- Write arrays time: " << (MPI_Wtime() - time) << " seconds" << endl; }
 
 	status = H5Fclose(file_id);
+}
+
+
+// function to perform binary write
+void binary(long long cols, long long localRows, double* arr) {
+	int mpiSize, mpiRank;
+	MPI_Comm_size(MPI_COMM_WORLD, &mpiSize);
+	MPI_Comm_rank(MPI_COMM_WORLD, &mpiRank);
+	double time = MPI_Wtime();
+
+	if (!mpiRank) std::cout << "\nPerforming BINARY Write\n" << std::endl;
+
+	long long size = localRows * cols;
+
+	std::string filename = "data" + std::to_string(mpiRank) + ".bin";
+	std::ofstream myFile; 
+	myFile.open(filename.c_str(), ios::binary | ios::out);
+	myFile.write(reinterpret_cast<char *>(&arr), sizeof(arr));
+	myFile.close();
+	if (!mpiRank) { cout << "-- Binary write arrays time: " << (MPI_Wtime() - time) << " seconds" << endl; }
+}
+
+// function to read from the binary files
+void read_binary(long long cols, long long localRows) {
+	int mpiSize, mpiRank;
+	MPI_Comm_size(MPI_COMM_WORLD, &mpiSize);
+	MPI_Comm_rank(MPI_COMM_WORLD, &mpiRank);
+
+	std::string filename = "data" + std::to_string(mpiRank) + ".bin";
+	std::ifstream myFile;
+	myFile.open(filename.c_str(), ios::binary | ios::in);
+
+	double* buffer = new double[localRows * cols];
+	myFile.read(reinterpret_cast<char*>(&buffer), sizeof(buffer));
+
+	for (int i = 0; i < localRows; i++) {
+		std::cout << mpiRank << ": ";
+		for (int j = 0; j < cols; j++) {
+			std::cout << buffer[i*cols+j] << " ";
+		}
+		std::cout << std::endl;
+	} 
+
+	myFile.close();
 }
